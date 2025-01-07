@@ -1,0 +1,116 @@
+/// This server is hosted on glitch
+
+=>  https://careful-wobbly-pancake.glitch.me
+=>  https://glitch.com/edit/#!/careful-wobbly-pancake
+
+
+/// signaling server
+
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
+
+// Initialize Express and HTTP server
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server);
+
+const PORT = process.env.PORT || 3000;
+
+// User mapping: Maps user IDs to socket IDs
+const users = {};
+
+app.get("/", (req, res) => {
+  res.send("WebRTC Signaling Server is running");
+});
+
+// Socket.IO connection
+io.on("connection", (socket) => {
+  console.log(`User connected: ${socket.id}`);
+
+  // Event: User registration
+  socket.on("register", (userId) => {
+    if (users[userId]) {
+      console.log(`User ${userId} already registered, updating socket.`);
+    }
+    users[userId] = socket.id; // Map user ID to socket ID
+    console.log(`User registered: ${userId}`);
+    console.log("Current users:", users);
+  });
+
+  // Event: Call initiation
+  socket.on("call", ({ to, offer }) => {
+    console.log(`Call initiated from ${socket.id} to ${to}`);
+
+    // Check if 'to' is a user ID or socket ID
+    const recipientSocketId = users[to] || to; // Try both user ID and socket ID
+
+    if (!recipientSocketId) {
+        console.error(`Invalid recipient for call: ${to}. Current users:`, users);
+        return;
+    }
+
+    io.to(recipientSocketId).emit("incomingCall", {
+        from: socket.id, // Sender's socket ID
+        offer,
+    });
+
+    console.log(`Call forwarded to ${recipientSocketId}`);
+});
+
+
+  // Event: Answer to a call
+  socket.on("answer", ({ to, answer }) => {
+    console.log(`Received answer event. From: ${socket.id}, To: ${to}`);
+    console.log(`Answer data:`, answer);
+
+    // Check if 'to' is a user ID or socket ID
+    const recipientSocketId = users[to] || to; // Try both user ID and socket ID
+
+    if (!recipientSocketId) {
+        console.error(`No recipient found for user ID: ${to}. Current users:`, users);
+        return;
+    }
+
+    io.to(recipientSocketId).emit("callAnswered", {
+        from: socket.id, // Sender's socket ID
+        answer,
+    });
+
+    console.log(`Emitting callAnswered to: ${recipientSocketId}`);
+});
+
+
+  // Event: ICE Candidate exchange
+  socket.on("iceCandidate", ({ to, candidate }) => {
+    console.log(`ICE candidate from ${socket.id} to ${to}`);
+    const recipientSocketId = users[to];
+    if (!recipientSocketId) {
+      console.error(`Invalid recipient for ICE candidate: ${to}. Current users:`, users);
+      return;
+    }
+    io.to(recipientSocketId).emit("iceCandidateReceived", {
+      from: socket.id,
+      candidate,
+    });
+    console.log(`ICE candidate forwarded to ${to}`);
+  });
+
+  // Event: Disconnection
+  socket.on("disconnect", () => {
+    const userId = Object.keys(users).find((key) => users[key] === socket.id);
+    if (userId) {
+      delete users[userId]; // Remove user from the map
+      console.log(`User ${userId} disconnected and removed from users list`);
+    }
+    console.log(`User disconnected: ${socket.id}`);
+    console.log("Current users:", users);
+  });
+});
+
+// Start the server
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
+
+
